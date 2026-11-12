@@ -52,7 +52,7 @@ _FNO_STOCKS: List[Tuple[str, str, str, str, float, int]] = [
     ("HCLTECH", "HCL Technologies Ltd", "IT", "it", 20.0, 350),
     ("WIPRO", "Wipro Ltd", "IT", "it", 5.0, 1500),
     ("TECHM", "Tech Mahindra Ltd", "IT", "it", 20.0, 600),
-    ("LTIM", "LTIMindtree Ltd", "IT", "it", 100.0, 150),
+    ("LTM", "LTIMindtree Ltd", "IT", "it", 100.0, 150),
     ("PERSISTENT", "Persistent Systems Ltd", "IT", "it", 100.0, 100),
     ("COFORGE", "Coforge Ltd", "IT", "it", 100.0, 75),
 
@@ -69,7 +69,7 @@ _FNO_STOCKS: List[Tuple[str, str, str, str, float, int]] = [
     # Auto
     ("MARUTI", "Maruti Suzuki India Ltd", "Auto", "auto", 100.0, 50),
     ("M&M", "Mahindra & Mahindra Ltd", "Auto", "auto", 50.0, 175),
-    ("TATAMOTORS", "Tata Motors Ltd", "Auto", "auto", 10.0, 550),
+    ("TMPV", "Tata Motors Passenger Veh", "Auto", "auto", 10.0, 550),
     ("BAJAJ-AUTO", "Bajaj Auto Ltd", "Auto", "auto", 100.0, 75),
     ("EICHERMOT", "Eicher Motors Ltd", "Auto", "auto", 50.0, 175),
     ("HEROMOTOCO", "Hero MotoCorp Ltd", "Auto", "auto", 50.0, 150),
