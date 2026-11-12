@@ -1,7 +1,8 @@
 """Core DojiStack screener orchestration, SQLite caching, and confluence calculation."""
 
+import threading
 import time
-from datetime import datetime
+from datetime import datetime, time as dtime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -20,7 +21,37 @@ from backend.universe import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
-CACHE_TTL_SEC = 300  # 5 minutes
+INTRADAY_TTL_SEC = 300  # 5 minutes during market hours
+_REFRESH_LOCKS: Dict[str, threading.Lock] = {
+    "75m": threading.Lock(),
+    "1D": threading.Lock(),
+    "1W": threading.Lock(),
+}
+
+
+def _last_eod_timestamp(now: Optional[datetime] = None) -> float:
+    """Return UNIX timestamp of the most recent NSE EOD close (15:35 IST on last trading weekday)."""
+    dt = now or datetime.now(IST)
+    d = dt.date()
+    if dt.weekday() < 5 and dt.time() >= dtime(15, 35):
+        target_date = d
+    else:
+        target_date = d - timedelta(days=1)
+        while target_date.weekday() >= 5:
+            target_date -= timedelta(days=1)
+    return datetime.combine(target_date, dtime(15, 35), tzinfo=IST).timestamp()
+
+
+def _is_cache_fresh(tf: str, updated_at: float) -> bool:
+    """
+    After market close (15:35 IST) or on weekends, any cache updated after the
+    most recent EOD close stays valid until the next market session—so clicking
+    the app link never triggers a fresh download.
+    """
+    if is_market_open():
+        ttl = INTRADAY_TTL_SEC if tf == "75m" else 3600
+        return (time.time() - updated_at) < ttl
+    return updated_at >= _last_eod_timestamp()
 
 
 def _active_universe() -> List[FnoStock]:
@@ -34,65 +65,73 @@ def refresh_timeframe_cache(tf: str = "1D", force: bool = False) -> str:
     Ensure spot (and available option) candles for `tf` are cached in SQLite.
     Returns data source label ("Angel One · Live" or "Yahoo + Bhavcopy").
     """
+    tf_norm = tf if tf in ("75m", "1D", "1W") else "1D"
     stocks = _active_universe()
     expiry = get_nearest_monthly_expiry()
 
-    # Check if cache is already fresh
+    # Fast path: check SQLite cache before acquiring lock
     if not force and stocks:
-        sample = load_candles(stocks[0].symbol, "stock", tf, max_age_sec=CACHE_TTL_SEC)
-        if sample is not None:
+        sample = load_candles(stocks[0].symbol, "stock", tf_norm)
+        if sample is not None and _is_cache_fresh(tf_norm, sample["updated_at"]):
             return "Angel One · Live" if angel_client.is_active() else "Yahoo + Bhavcopy"
 
-    use_angel = angel_client.is_active()
-    source_label = "Angel One · Live" if use_angel else "Yahoo + Bhavcopy"
+    lock = _REFRESH_LOCKS.setdefault(tf_norm, threading.Lock())
+    with lock:
+        if not force and stocks:
+            sample = load_candles(stocks[0].symbol, "stock", tf_norm)
+            if sample is not None and _is_cache_fresh(tf_norm, sample["updated_at"]):
+                return "Angel One · Live" if angel_client.is_active() else "Yahoo + Bhavcopy"
 
-    spot_map: Dict[str, List[Dict[str, Any]]] = {}
-    if use_angel:
-        for s in stocks:
-            eq = angel_client.get_equity_token(s.symbol)
-            if eq:
-                candles = angel_client.get_candles("NSE", eq["token"], tf)
-                if candles:
-                    spot_map[s.symbol] = candles
+        use_angel = angel_client.is_active()
+        source_label = "Angel One · Live" if use_angel else "Yahoo + Bhavcopy"
+
+        spot_map: Dict[str, List[Dict[str, Any]]] = {}
+        if use_angel:
+            for s in stocks:
+                eq = angel_client.get_equity_token(s.symbol)
+                if eq:
+                    candles = angel_client.get_candles("NSE", eq["token"], tf_norm)
+                    if candles:
+                        spot_map[s.symbol] = candles
+            if not spot_map:
+                use_angel = False
+                source_label = "Yahoo + Bhavcopy"
+
         if not spot_map:
-            use_angel = False
-            source_label = "Yahoo + Bhavcopy"
+            spot_map = fetch_yahoo_spot_batch(stocks, tf=tf_norm)
 
-    if not spot_map:
-        spot_map = fetch_yahoo_spot_batch(stocks, tf=tf)
+        for s in stocks:
+            candles = spot_map.get(s.symbol, [])
+            if not candles:
+                continue
+            ltp = float(candles[-1]["close"])
+            strike = nearest_atm_strike(ltp, s.strike_step)
+            save_candles(s.symbol, "stock", tf_norm, candles, strike=strike, expiry=expiry)
 
-    for s in stocks:
-        candles = spot_map.get(s.symbol, [])
-        if not candles:
-            continue
-        ltp = float(candles[-1]["close"])
-        strike = nearest_atm_strike(ltp, s.strike_step)
-        save_candles(s.symbol, "stock", tf, candles, strike=strike, expiry=expiry)
+            # Fetch/load ATM CE & PE candles
+            for opt_type in ("CE", "PE"):
+                kind = opt_type.lower()
+                opt_candles: List[Dict[str, Any]] = []
+                if use_angel:
+                    opt_meta = angel_client.get_option_token(s.symbol, expiry, strike, opt_type)
+                    if opt_meta:
+                        opt_candles = angel_client.get_candles("NFO", opt_meta["token"], tf_norm)
+                if not opt_candles and tf_norm in ("1D", "1W"):
+                    opt_candles = get_bhavcopy_option_candles(
+                        symbol=s.symbol,
+                        expiry=expiry,
+                        strike=strike,
+                        opt_type=opt_type,
+                        tf=tf_norm,
+                    )
+                if opt_candles:
+                    save_candles(s.symbol, kind, tf_norm, opt_candles, strike=strike, expiry=expiry)
 
-        # Fetch/load ATM CE & PE candles
-        for opt_type in ("CE", "PE"):
-            kind = opt_type.lower()
-            opt_candles: List[Dict[str, Any]] = []
-            if use_angel:
-                opt_meta = angel_client.get_option_token(s.symbol, expiry, strike, opt_type)
-                if opt_meta:
-                    opt_candles = angel_client.get_candles("NFO", opt_meta["token"], tf)
-            if not opt_candles and tf in ("1D", "1W"):
-                opt_candles = get_bhavcopy_option_candles(
-                    symbol=s.symbol,
-                    expiry=expiry,
-                    strike=strike,
-                    opt_type=opt_type,
-                    tf=tf,
-                )
-            if opt_candles:
-                save_candles(s.symbol, kind, tf, opt_candles, strike=strike, expiry=expiry)
-
-    now_iso = datetime.now(IST).strftime("%d %b %Y · %H:%M IST")
-    set_meta("last_updated", now_iso)
-    set_meta("data_source", source_label)
-    set_meta("nearest_expiry", expiry)
-    return source_label
+        now_iso = datetime.now(IST).strftime("%d %b %Y · %H:%M IST")
+        set_meta("last_updated", now_iso)
+        set_meta("data_source", source_label)
+        set_meta("nearest_expiry", expiry)
+        return source_label
 
 
 def run_screen(

@@ -24,6 +24,16 @@ IST = ZoneInfo("Asia/Kolkata")
 scheduler = BackgroundScheduler(timezone=IST)
 
 
+def _cron_eod_download() -> None:
+    """Download EOD data automatically at 15:45 IST (Mon-Fri) and store in SQLite."""
+    try:
+        refresh_timeframe_cache("1D", force=True)
+        refresh_timeframe_cache("1W", force=True)
+        refresh_timeframe_cache("75m", force=True)
+    except Exception:
+        pass
+
+
 def _cron_daily_bhavcopy() -> None:
     try:
         ingest_recent_bhavcopies(days_back=5)
@@ -41,14 +51,23 @@ def _cron_intraday_75m() -> None:
             pass
 
 
+def _startup_prewarm() -> None:
+    try:
+        if not has_bhavcopy_data(min_days=3):
+            ingest_recent_bhavcopies(days_back=12)
+        refresh_timeframe_cache("1D", force=False)
+        refresh_timeframe_cache("1W", force=False)
+        refresh_timeframe_cache("75m", force=False)
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    if not has_bhavcopy_data(min_days=3):
-        threading.Thread(
-            target=ingest_recent_bhavcopies, kwargs={"days_back": 12}, daemon=True
-        ).start()
-    scheduler.add_job(_cron_daily_bhavcopy, "cron", hour=18, minute=10, id="daily_bhavcopy", replace_existing=True)
+    threading.Thread(target=_startup_prewarm, daemon=True).start()
+    scheduler.add_job(_cron_eod_download, "cron", day_of_week="mon-fri", hour=15, minute=45, id="eod_1545", replace_existing=True)
+    scheduler.add_job(_cron_daily_bhavcopy, "cron", day_of_week="mon-fri", hour=18, minute=10, id="daily_bhavcopy", replace_existing=True)
     scheduler.add_job(_cron_intraday_75m, "cron", day_of_week="mon-fri", hour="9-15", minute="*/5", id="intraday_75m", replace_existing=True)
     scheduler.start()
     try:

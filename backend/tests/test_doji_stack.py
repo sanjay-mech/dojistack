@@ -12,6 +12,7 @@ from backend.doji import (
     resample_daily_to_weekly,
 )
 from backend.main import app
+from backend.screener import _last_eod_timestamp
 from backend.universe import get_nearest_monthly_expiry, nearest_atm_strike
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -78,6 +79,18 @@ def test_atm_strike_and_expiry_rollover():
     # Nov 2026 last Thursday is Nov 26; on Nov 26 it rolls to Dec 31
     assert get_nearest_monthly_expiry(date(2026, 11, 12)) == "2026-11-26"
     assert get_nearest_monthly_expiry(date(2026, 11, 26)) == "2026-12-31"
+
+
+def test_eod_timestamp_boundary():
+    # After 15:35 IST on a weekday, last EOD is today at 15:35 IST
+    after_close = datetime(2026, 11, 12, 18, 0, tzinfo=IST)
+    eod_ts = _last_eod_timestamp(after_close)
+    assert datetime.fromtimestamp(eod_ts, tz=IST).strftime("%Y-%m-%d %H:%M") == "2026-11-12 15:35"
+
+    # Before 15:35 IST on a weekday, last EOD is previous weekday at 15:35 IST
+    before_close = datetime(2026, 11, 12, 10, 0, tzinfo=IST)
+    prev_eod_ts = _last_eod_timestamp(before_close)
+    assert datetime.fromtimestamp(prev_eod_ts, tz=IST).strftime("%Y-%m-%d %H:%M") == "2026-11-11 15:35"
 
 
 def test_api_meta():
