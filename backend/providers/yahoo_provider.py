@@ -69,7 +69,7 @@ def fetch_yahoo_spot_batch(
         group_by="ticker",
         auto_adjust=False,
         progress=False,
-        threads=True,
+        threads=False,
     )
     if raw is None or raw.empty:
         return {}
