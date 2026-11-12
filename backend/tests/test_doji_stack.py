@@ -85,5 +85,5 @@ def test_api_meta():
         res = client.get("/api/meta")
         assert res.status_code == 200
         data = res.json()
-        assert data["universe_size"] == 76
+        assert data["universe_size"] == 218
         assert len(data["sectors"]) > 0

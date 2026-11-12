@@ -143,6 +143,14 @@ def save_bhavcopy_rows(rows: List[Dict[str, Any]]) -> int:
     return len(rows)
 
 
+def has_bhavcopy_data(min_days: int = 3) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT trade_date) AS cnt FROM bhavcopy_options"
+        ).fetchone()
+        return bool(row and row["cnt"] >= min_days)
+
+
 def load_option_history(
     symbol: str,
     expiry: str,

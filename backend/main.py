@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+import threading
 from typing import Any, Dict
 from zoneinfo import ZoneInfo
 
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.database import get_meta, init_db
+from backend.database import get_meta, has_bhavcopy_data, init_db
 from backend.doji import is_market_open
 from backend.providers.angel_provider import angel_client
 from backend.providers.bhavcopy_provider import ingest_recent_bhavcopies
@@ -43,6 +44,10 @@ def _cron_intraday_75m() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    if not has_bhavcopy_data(min_days=3):
+        threading.Thread(
+            target=ingest_recent_bhavcopies, kwargs={"days_back": 12}, daemon=True
+        ).start()
     scheduler.add_job(_cron_daily_bhavcopy, "cron", hour=18, minute=10, id="daily_bhavcopy", replace_existing=True)
     scheduler.add_job(_cron_intraday_75m, "cron", day_of_week="mon-fri", hour="9-15", minute="*/5", id="intraday_75m", replace_existing=True)
     scheduler.start()

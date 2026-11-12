@@ -62,45 +62,49 @@ def fetch_yahoo_spot_batch(
     else:
         period, interval, intraday = "6mo", "1d", False
 
-    raw = yf.download(
-        tickers=tickers,
-        period=period,
-        interval=interval,
-        group_by="ticker",
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
-    if raw is None or raw.empty:
-        return {}
-
     result: Dict[str, List[Dict[str, Any]]] = {}
-    if len(tickers) == 1:
-        s = items[0]
-        sub = (
-            raw[s.yf_symbol]
-            if isinstance(raw.columns, pd.MultiIndex)
-            and s.yf_symbol in raw.columns.get_level_values(0)
-            else raw
+    chunk_size = 55
+    for start in range(0, len(items), chunk_size):
+        chunk_items = items[start : start + chunk_size]
+        chunk_tickers = [s.yf_symbol for s in chunk_items]
+        raw = yf.download(
+            tickers=chunk_tickers,
+            period=period,
+            interval=interval,
+            group_by="ticker",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
         )
-        candles = _df_to_candles(sub, intraday=intraday)
-        if tf == "75m":
-            candles = resample_15m_to_75m(candles)
-        elif tf == "1W":
-            candles = resample_daily_to_weekly(candles)
-        if candles:
-            result[s.symbol] = candles
-        return result
-
-    top_cols = set(raw.columns.get_level_values(0))
-    for s in items:
-        if s.yf_symbol not in top_cols:
+        if raw is None or raw.empty:
             continue
-        candles = _df_to_candles(raw[s.yf_symbol], intraday=intraday)
-        if tf == "75m":
-            candles = resample_15m_to_75m(candles)
-        elif tf == "1W":
-            candles = resample_daily_to_weekly(candles)
-        if candles:
-            result[s.symbol] = candles
+
+        if len(chunk_tickers) == 1:
+            s = chunk_items[0]
+            sub = (
+                raw[s.yf_symbol]
+                if isinstance(raw.columns, pd.MultiIndex)
+                and s.yf_symbol in raw.columns.get_level_values(0)
+                else raw
+            )
+            candles = _df_to_candles(sub, intraday=intraday)
+            if tf == "75m":
+                candles = resample_15m_to_75m(candles)
+            elif tf == "1W":
+                candles = resample_daily_to_weekly(candles)
+            if candles:
+                result[s.symbol] = candles
+            continue
+
+        top_cols = set(raw.columns.get_level_values(0))
+        for s in chunk_items:
+            if s.yf_symbol not in top_cols:
+                continue
+            candles = _df_to_candles(raw[s.yf_symbol], intraday=intraday)
+            if tf == "75m":
+                candles = resample_15m_to_75m(candles)
+            elif tf == "1W":
+                candles = resample_daily_to_weekly(candles)
+            if candles:
+                result[s.symbol] = candles
     return result

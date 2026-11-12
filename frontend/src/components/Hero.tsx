@@ -27,9 +27,10 @@ export const Hero: React.FC<HeroProps> = ({ universeSize }) => {
             before the move.
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-[#7d8794] sm:text-[15px]">
-            Scans {universeSize} NSE F&amp;O stocks — and their at-the-money call and put — for
-            back-to-back doji candles on the 75-minute, daily and weekly charts. Double, triple
-            and longer streaks mark indecision that often resolves with a sharp breakout.
+            Scans {universeSize} NSE F&amp;O stocks — and their {universeSize} ATM calls and{" "}
+            {universeSize} ATM puts ({universeSize * 3} charts) — for back-to-back doji candles on
+            the 75-minute, daily and weekly charts. Double, triple and longer streaks mark
+            indecision that often resolves with a sharp breakout.
           </p>
         </div>
 
