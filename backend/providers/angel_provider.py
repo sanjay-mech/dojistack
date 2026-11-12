@@ -10,7 +10,6 @@ from zoneinfo import ZoneInfo
 
 import pyotp
 import requests
-from SmartApi import SmartConnect
 
 from backend.config import (
     ANGEL_API_KEY,
@@ -46,7 +45,7 @@ class RateLimiter:
 
 class AngelClient:
     def __init__(self) -> None:
-        self._smart: Optional[SmartConnect] = None
+        self._smart: Any = None
         self._session_ts: float = 0.0
         self._limiter = RateLimiter(0.36)
         self._scrip_index: Optional[Dict[str, Any]] = None
@@ -54,12 +53,14 @@ class AngelClient:
     def is_active(self) -> bool:
         return LIVE_MODE and angel_credentials_ready() and is_market_open()
 
-    def ensure_session(self) -> Optional[SmartConnect]:
+    def ensure_session(self) -> Any:
         if not angel_credentials_ready():
             return None
         # Refresh session every 6 hours
         if self._smart is not None and (time.time() - self._session_ts) < 21600:
             return self._smart
+
+        from SmartApi import SmartConnect
 
         smart = SmartConnect(api_key=ANGEL_API_KEY)
         totp = pyotp.TOTP(ANGEL_TOTP_SECRET).now()
